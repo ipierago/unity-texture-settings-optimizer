@@ -157,8 +157,8 @@ public class CameraGameObject : MonoBehaviour
         Vector2 iuv1 = new Vector2(uv1.x * iw1, uv1.y * iw1);
         Vector2 iuv2 = new Vector2(uv2.x * iw2, uv2.y * iw2);
 
-        const int numSteps = 10;
-        Vector2 delta = new Vector2((sp1.x - sp0.x) / numSteps, (sp1.y - sp0.y) / numSteps);
+        const int numSteps = 11;
+        Vector2 delta = new Vector2((sp1.x - sp0.x) / (numSteps - 1), (sp1.y - sp0.y) / (numSteps - 1));
         Vector2[] spArray = new Vector2[numSteps];
         Vector3[] wArray = new Vector3[numSteps];
         float[] iwArray = new float[numSteps];
