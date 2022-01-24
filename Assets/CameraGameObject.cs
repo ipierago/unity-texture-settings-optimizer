@@ -15,6 +15,10 @@ public class CameraGameObject : MonoBehaviour
     }
 
 
+    void CHECK(bool exp) {
+        
+    }
+
     void Test(Camera camera, Vector3 in_wp)
     {
 
@@ -123,7 +127,7 @@ public class CameraGameObject : MonoBehaviour
         Vector3 w2 = BarycentricV3(spp_v2, sp0_v2, sp1_v2, sp2_v2);
     }
 
-    Vector3 ComputeBarycentricCoords(float px, float py, float v1x, float v1y, float v2x, float v2y, float v3x, float v3y)
+    Vector3 ComputeBarycentricCoordsV4(float px, float py, float v1x, float v1y, float v2x, float v2y, float v3x, float v3y)
     {
         float w1 = ((v2y - v3y) * (px - v3x) + (v3x - v2x) * (py - v3y)) /
                 ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
@@ -131,6 +135,16 @@ public class CameraGameObject : MonoBehaviour
                 ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
         float w3 = 1.0f - w1 - w2;
         return new Vector3(w1, w2, w3);
+    }
+
+    float[] ComputeBarycentricCoords(float px, float py, float v1x, float v1y, float v2x, float v2y, float v3x, float v3y)
+    {
+        float w1 = ((v2y - v3y) * (px - v3x) + (v3x - v2x) * (py - v3y)) /
+                ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
+        float w2 = ((v3y - v1y) * (px - v3x) + (v1x - v3x) * (py - v3y)) /
+                ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
+        float w3 = 1.0f - w1 - w2;
+        return new float[] {w1, w2, w3};
     }    
 
     void TestInterpolation() {
@@ -166,7 +180,7 @@ public class CameraGameObject : MonoBehaviour
         Vector2[] uvArray = new Vector2[numSteps];
         for (int i = 0; i < numSteps; ++i) {
             Vector2 sp = new Vector2(sp0.x + i * delta.x, sp0.y + i * delta.y);
-            Vector3 w = ComputeBarycentricCoords(sp.x, sp.y, sp0.x, sp0.y, sp1.x, sp1.y, sp2.x, sp2.y);
+            Vector3 w = ComputeBarycentricCoordsV4(sp.x, sp.y, sp0.x, sp0.y, sp1.x, sp1.y, sp2.x, sp2.y);
             float iw = w.x * iw0 + w.y * iw1 + w.z * iw2;
             Vector2 iuv = w.x * iuv0 + w.y * iuv1 + w.z * iuv2;
             Vector2 uv = iuv / iw;
@@ -175,8 +189,88 @@ public class CameraGameObject : MonoBehaviour
             iwArray[i] = iw;
             iuvArray[i] = iuv;
             uvArray[i] = uv;
-        }
+        }        
+    }
+
+    Vector2 ComputeInterpolatedUV(float sx, float sy, Vector3[] sxsywArray, float[] rhwArray, Vector2[] rhwuvArray) {
+        float[] w = ComputeBarycentricCoords(sx, sy, sxsywArray[0].x, sxsywArray[0].y, sxsywArray[1].x, sxsywArray[1].y, sxsywArray[2].x, sxsywArray[2].y);
+        float rhw = w[0] * rhwArray[0] + w[1] * rhwArray[1] + w[2] * rhwArray[2];
+        Vector2 rhwuv = w[0] * rhwuvArray[0] + w[1] * rhwuvArray[1] + w[2] * rhwuvArray[2];
+        Vector2 uv = rhwuv / rhw;
+        return uv;
+    }
+
+    float[] ComputeMipUVAreasForTriangle(Vector3[] sxsywArray, Vector2[] uvArray) {
         
+        // Compute screen positions and interpolants at each vertex
+        float[] rhwArray = new float[3]; // 1/w interpolant
+        Vector2[] rhwuvArray = new Vector2[3]; // uv/ w interpolant
+        for (int i = 0; i < 3; ++i) {
+            rhwArray[i] = 1.0f / sxsywArray[i].z;
+            rhwuvArray[i] = rhwArray[i] * uvArray[i];
+        }
+
+        // Output array
+        float[] uvAreasArray = new float[3];
+
+        const float d = 1.0f; // Distance from each point to interpolate
+        for (int i = 0; i < 3; ++i) {
+            // Data for this point
+            float sx = sxsywArray[i].x;
+            float sy = sxsywArray[i].y;
+            Vector2 uv = uvArray[i];
+
+            // Compute interpolated UV for d pixel in both screen directions
+            Vector2 uv_dx = ComputeInterpolatedUV(sx + d, sy, sxsywArray, rhwArray, rhwuvArray);
+            Vector2 uv_dy = ComputeInterpolatedUV(sx, sy + d, sxsywArray, rhwArray, rhwuvArray);
+
+            // Complete computation of partial derivatives
+            Vector2 duv_dx = uv_dx - uv;
+            Vector2 duv_dy = uv_dy - uv;
+
+            // Compute uv area of parallelogram mapped by a single pixel
+            float a_uv = Mathf.Abs(duv_dx.x * duv_dy.y - duv_dy.x * duv_dx.y) / (d * d);
+            uvAreasArray[i] = a_uv;
+        }
+        return uvAreasArray;
+    }
+
+    void ComputeMipUVAreasForTriangle_Test() {
+        const float k_dx = 256.0f; const float k_dy = 256.0f;
+        for (int iScale = 1; iScale < 8; ++iScale) {
+            float dx = k_dx / iScale; float dy = k_dy / iScale;
+            Vector3[] sxsywArray = new Vector3[] {new Vector3(0.0f, 0.0f, 1.0f), new Vector3(dx, 0.0f, 1.0f), new Vector3(dx, dy, 1.0f)};
+            Vector2[] uvArray = new Vector2[] {new Vector2(0.0f, 0.0f), new Vector2(1.0f, 0.0f), new Vector2(1.0f, 1.0f)};
+            float[] uvAreaArray = ComputeMipUVAreasForTriangle(sxsywArray, uvArray);
+            float[] mipLevelArray = new float[3];
+            for (int i = 0; i < 3; ++i) {mipLevelArray[i] = uvAreaArray[i] * k_dx * k_dy;}
+        }
+    }
+
+    float[] ComputeMipLevelsForMesh(Camera camera, Vector2 textureSizeInPixels, Vector3[] meshVertexArray, Vector2[] meshUVArray, int[] meshIndexArray) {
+        int numTriangles = meshIndexArray.Length / 3;
+        float[] meshMipLevelArray = new float[numTriangles * 3];
+        for (int iTriangle = 0; iTriangle < numTriangles; ++iTriangle) {
+            int i0 = meshIndexArray[iTriangle * 3];
+            int i1 = meshIndexArray[iTriangle * 3 + 1];
+            int i2 = meshIndexArray[iTriangle * 3 + 2];
+            Vector3[] sxsywArray = new Vector3[] {camera.WorldToScreenPoint(meshVertexArray[i0]), camera.WorldToScreenPoint(meshVertexArray[i1]), camera.WorldToScreenPoint(meshVertexArray[i2])};
+            Vector2[] uvArray = new Vector2[] {meshUVArray[i0], meshUVArray[i1], meshUVArray[i2]};
+            float[] triangleMipUVAreasArray = ComputeMipUVAreasForTriangle(sxsywArray, uvArray);
+            // Convert uv areas to texel areas which are equivalent to mip level
+            for (int i = 0; i < 3; ++i) {meshMipLevelArray[iTriangle * 3 + i] = triangleMipUVAreasArray[i] * textureSizeInPixels.x * textureSizeInPixels.y;}
+        }
+        return meshMipLevelArray;
+    }
+
+    void TestMipSelection() {
+        Camera camera = GetComponent<Camera>();
+
+        Vector3[] meshVertexArray = new Vector3[] { new Vector3(0.0f, 0.0f, 0.0f), new Vector3(5.0f, 0.0f, 100.0f), new Vector3(5.0f, 5.0f, 100.0f) };
+        Vector2[] meshUVArray = new Vector2[] {new Vector3(0.0f, 0.0f), new Vector3(1.0f, 0.0f), new Vector3(1.0f, 1.0f) };
+        int[] meshIndexArray = new int[] {0, 1, 2};
+        Vector2 textureSizeInPixels = new Vector2(256.0f, 256.0f);
+        float [] meshMipLevelArray = ComputeMipLevelsForMesh(camera, textureSizeInPixels, meshVertexArray, meshUVArray, meshIndexArray);
     }
 
 
@@ -256,6 +350,8 @@ public class CameraGameObject : MonoBehaviour
     void Update()
     {
         //TestBarycentric ();
-        TestInterpolation();
+        //TestInterpolation();
+        //TestMipSelection();
+        ComputeMipUVAreasForTriangle_Test();
     }
 }
