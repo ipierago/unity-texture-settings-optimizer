@@ -14,10 +14,24 @@ public class CameraGameObject : MonoBehaviour
         
     }
 
-
-    void CHECK(bool exp) {
-        
-    }
+    Vector3 manualWorldToScreenPoint(Camera cam, Vector3 wp) {
+         // calculate view-projection matrix
+         Matrix4x4 mat = cam.projectionMatrix * cam.worldToCameraMatrix;
+ 
+         // multiply world point by VP matrix
+         Vector4 temp = mat * new Vector4(wp.x, wp.y, wp.z, 1f);
+ 
+         if (temp.w == 0f) {
+             // point is exactly on camera focus point, screen point is undefined
+             // unity handles this by returning 0,0,0
+             return Vector3.zero;
+         } else {
+             // convert x and y from clip space to window coordinates
+             temp.x = (temp.x/temp.w + 1f)*.5f * cam.pixelWidth;
+             temp.y = (temp.y/temp.w + 1f)*.5f * cam.pixelHeight;
+             return new Vector3(temp.x, temp.y, wp.z);
+         }
+     }
 
     void Test(Camera camera, Vector3 in_wp)
     {
@@ -236,14 +250,14 @@ public class CameraGameObject : MonoBehaviour
     }
 
     void ComputeMipUVAreasForTriangle_Test() {
-        const float k_dx = 256.0f; const float k_dy = 256.0f;
+        const float k_dx = 100.0f; const float k_dy = 100.0f;
         for (int iScale = 1; iScale < 8; ++iScale) {
             float dx = k_dx / iScale; float dy = k_dy / iScale;
             Vector3[] sxsywArray = new Vector3[] {new Vector3(0.0f, 0.0f, 1.0f), new Vector3(dx, 0.0f, 1.0f), new Vector3(dx, dy, 1.0f)};
             Vector2[] uvArray = new Vector2[] {new Vector2(0.0f, 0.0f), new Vector2(1.0f, 0.0f), new Vector2(1.0f, 1.0f)};
             float[] uvAreaArray = ComputeMipUVAreasForTriangle(sxsywArray, uvArray);
             float[] mipLevelArray = new float[3];
-            for (int i = 0; i < 3; ++i) {mipLevelArray[i] = uvAreaArray[i] * k_dx * k_dy;}
+            for (int i = 0; i < 3; ++i) {mipLevelArray[i] = Mathf.Sqrt(uvAreaArray[i] * k_dx * k_dy);}
         }
     }
 
@@ -258,7 +272,7 @@ public class CameraGameObject : MonoBehaviour
             Vector2[] uvArray = new Vector2[] {meshUVArray[i0], meshUVArray[i1], meshUVArray[i2]};
             float[] triangleMipUVAreasArray = ComputeMipUVAreasForTriangle(sxsywArray, uvArray);
             // Convert uv areas to texel areas which are equivalent to mip level
-            for (int i = 0; i < 3; ++i) {meshMipLevelArray[iTriangle * 3 + i] = triangleMipUVAreasArray[i] * textureSizeInPixels.x * textureSizeInPixels.y;}
+            for (int i = 0; i < 3; ++i) {meshMipLevelArray[iTriangle * 3 + i] = Mathf.Sqrt(triangleMipUVAreasArray[i] * textureSizeInPixels.x * textureSizeInPixels.y);}
         }
         return meshMipLevelArray;
     }
@@ -347,11 +361,61 @@ public class CameraGameObject : MonoBehaviour
         }
     }
 
+    void ClipTest() {
+
+        Camera camera = GetComponent<Camera>();
+
+        Vector3[] meshVertexArray = new Vector3[] {
+            new Vector3(0.0f, 0.0f, 0.0f),
+            new Vector3(0.0f, 0.0f, -20.0f),
+            new Vector3(0.0f, 0.0f, 1010.0f),
+            new Vector3(0.0f, 0.0f, 20.0f),
+            new Vector3(100.0f, 0.0f, 20.0f),
+            new Vector3(-100.0f, 0.0f, 20.0f),
+            new Vector3(0.0f, 100.0f, 20.0f),
+            new Vector3(0.0f, -100.0f, 20.0f),
+        }; 
+
+        // Normals of clip planes in homogeneous space facing inwards for LH space
+        Vector4[] homoClipPlaneNormalsLH = new Vector4[] {
+            new Vector4( 1.0f, 0.0f, 0.0f, 1.0f),  // x left
+            new Vector4(-1.0f, 0.0f, 0.0f, 1.0f),  // x right
+            new Vector4( 0.0f,-1.0f, 0.0f, 1.0f),  // y top
+            new Vector4( 0.0f, 1.0f, 0.0f, 1.0f),  // y bottom
+            new Vector4( 0.0f, 0.0f, 1.0f, 1.0f),  // z near
+            new Vector4( 0.0f, 0.0f,-1.0f, 1.0f),  // z far
+        };
+
+        Vector4[] meshHomoCoord = new Vector4[meshVertexArray.Length];
+        for (int i = 0; i < meshVertexArray.Length; ++i) {
+            Vector3 worldVertex3 = meshVertexArray[i];
+            Vector4 worldVertex = new Vector4(worldVertex3.x, worldVertex3.y, worldVertex3.z, 1.0f);
+            Vector4 viewVertex = camera.worldToCameraMatrix * worldVertex;
+            Vector4 projVertex = camera.projectionMatrix * viewVertex;
+
+            float[] dotClipPlanes = new float[homoClipPlaneNormalsLH.Length];
+            int clipCode = 0;
+            for (int j = 0; j < homoClipPlaneNormalsLH.Length; ++j) {
+                dotClipPlanes[j] = Vector4.Dot(projVertex, homoClipPlaneNormalsLH[j]);
+                if (dotClipPlanes[j] < 0) clipCode |= (1 << j);
+            }
+
+            Vector3 vp_check = camera.WorldToViewportPoint(worldVertex3);
+            meshHomoCoord[i] = projVertex;
+        }
+
+
+
+    }
+
     void Update()
     {
         //TestBarycentric ();
         //TestInterpolation();
         //TestMipSelection();
-        ComputeMipUVAreasForTriangle_Test();
+        
+        //ComputeMipUVAreasForTriangle_Test();
+
+        ClipTest();
     }
 }
