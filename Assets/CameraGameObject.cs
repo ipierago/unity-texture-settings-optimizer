@@ -568,6 +568,16 @@ public class CameraGameObject : MonoBehaviour
         return output;
     }
 
+    ClipStepOutput lastClipStepOutput;
+
+    struct Geometry {
+        public Vector3[] posArray;
+        public int[] triListIndexArray;
+    }
+
+    Geometry lastGeometry;
+
+
     void ClipTest2() {
 
         // Normals of clip planes in homogeneous space facing inwards for LH space
@@ -594,6 +604,9 @@ public class CameraGameObject : MonoBehaviour
 
         int [] triListIndexArray = new int [] { 0, 1, 2};
 
+        lastGeometry.posArray = localPosArray;
+        lastGeometry.triListIndexArray = triListIndexArray;
+
         Camera camera = GetComponent<Camera>();
 
         // Transform all the points and compute clip codes
@@ -601,13 +614,22 @@ public class CameraGameObject : MonoBehaviour
         TransformStepOutput transformStepOutput = TransformStep(worldViewProjMatrix, homoClipPlaneNormalsLH, localPosArray);
 
         // Trivially accept or reject based on clip AND and OR
+        ClipStepOutput clipStepOutput;
         if (transformStepOutput.clipCodeAND != 0) {
             // trivially reject
+            clipStepOutput.homoPosArray = null;
+            clipStepOutput.uvArray = null;
+            clipStepOutput.triListIndexArray = null;
+
         } else if (transformStepOutput.clipCodeOR == 0) {
             // trivially accept
+            clipStepOutput.homoPosArray = transformStepOutput.homoPosArray;
+            clipStepOutput.uvArray = uvArray;
+            clipStepOutput.triListIndexArray = triListIndexArray;
         } else {
-            ClipStepOutput clipStepOutput = ClipStep(transformStepOutput.homoPosArray, uvArray, triListIndexArray, homoClipPlaneNormalsLH, transformStepOutput.dotClipPlanesArray, transformStepOutput.clipCodeArray);
+            clipStepOutput = ClipStep(transformStepOutput.homoPosArray, uvArray, triListIndexArray, homoClipPlaneNormalsLH, transformStepOutput.dotClipPlanesArray, transformStepOutput.clipCodeArray);
         }
+        lastClipStepOutput = clipStepOutput;
     }
 
     void Update()
@@ -621,5 +643,40 @@ public class CameraGameObject : MonoBehaviour
         //ClipTest1();
 
         ClipTest2();
+    }
+
+    void DrawGeometry(Geometry geometry, Color color) {
+        Gizmos.color = color;
+        for (int i = 0; i < geometry.triListIndexArray.Length; ++i) {
+            int i0 = geometry.triListIndexArray[i];
+            int i1 = geometry.triListIndexArray[(i + 1) % geometry.triListIndexArray.Length];
+            Vector3 v0 = geometry.posArray[i0];
+            Vector3 v1 = geometry.posArray[i1];
+            Gizmos.DrawLine(v0, v1);
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        if (lastGeometry.triListIndexArray != null) {
+            DrawGeometry(lastGeometry, Color.yellow);
+        }
+
+        if (lastClipStepOutput.triListIndexArray != null) {
+            Geometry geometry;
+            geometry.triListIndexArray = lastClipStepOutput.triListIndexArray;
+            geometry.posArray = new Vector3[lastClipStepOutput.homoPosArray.Length];
+
+            Camera camera = GetComponent<Camera>();
+            Matrix4x4 worldViewProjMatrix = camera.projectionMatrix * camera.worldToCameraMatrix;
+            Matrix4x4 inv = Matrix4x4.Inverse(worldViewProjMatrix);
+            for (int i = 0; i < lastClipStepOutput.homoPosArray.Length; ++i) {
+                Vector4 hpos = lastClipStepOutput.homoPosArray[i];
+                Vector4 wpos4 = inv * hpos;
+                Vector3 wpos3 = new Vector3(wpos4.x, wpos4.y, wpos4.z);
+                geometry.posArray[i] = wpos3;
+            }
+            DrawGeometry(geometry, Color.red);
+        }
     }
 }
