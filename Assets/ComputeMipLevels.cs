@@ -207,11 +207,11 @@ public class ComputeMipLevels
             sxsyrhw.x = (hxhyhzw.x/hxhyhzw.w + 1f)*.5f * screenSizeInPixels.x;
             sxsyrhw.y = (hxhyhzw.y/hxhyhzw.w + 1f)*.5f * screenSizeInPixels.y;
             sxsyrhw.z = 1f / hxhyhzw.w;
+            output.sxsyrhwArray[i] = sxsyrhw;
 
             // Compute reciprocal w times uv
             Vector2 uv = uvArray[i];
-            Vector2 rhwuv = output.rhwuvArray[i];
-            rhwuv = sxsyrhw.z * uv;
+            output.rhwuvArray[i] = sxsyrhw.z * uv;
         }
 
         return output;
