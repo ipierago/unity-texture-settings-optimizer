@@ -2,13 +2,20 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class MipLevelCompute
+// Contains static functions to compute the range of mip levels used by input geometry
+// Main entry point is Main function
+public class ComputeMipLevels
 {
    // Output for TransformStep
     struct TransformStepOutput {
+        // Homogenous coordinates
         public Vector4[] hxhyhzwArray;
+        // Dot product of each vertex with each clip plane
+        // TODO: Currently unused
         public float[,] dotClipPlanesArray;
+        // Clip codes for every vertex
         public int [] clipCodeArray;
+        // Bitwise AND and OR of all clip codes
         public int clipCodeAND;
         public int clipCodeOR;
     }
@@ -46,8 +53,11 @@ public class MipLevelCompute
         return output;
     }
 
+    // Output of ClipPolygon
     struct ClipPolygonOutput {
+        // Homogeneous coordinates of clipped polygon
         public List<Vector4> hxhyhzwList;
+        // UV coordinates of clipped polygon
         public List<Vector2> uvList;
     }
 
@@ -90,8 +100,11 @@ public class MipLevelCompute
 
     // Output of clip step
     struct ClipStepOutput {
+        // Homogeneous coordinates of clipped geometry
         public Vector4[] hxhyhzwArray;
+        // UV coordinates of clipped geometry
         public Vector2[] uvArray;
+        // Triange list indices for clipped geometry
         public int[] triListIndexArray;
     }
 
@@ -99,6 +112,7 @@ public class MipLevelCompute
     static ClipStepOutput ClipStep(Vector4[] in_hxhyhzwArray, Vector2[] in_uvArray, int[] in_triListIndexArray, Vector4[] in_homoClipPlaneNormals, float[,] in_dotClipPlanesArray, int [] in_clipCodeArray) {
         ClipStepOutput output;
 
+        // Allocate lists for our output which will be converted to arrays later
         List<Vector4> out_hxhyhzwList = new List<Vector4>();
         List<Vector2> out_uvList = new List<Vector2>();
         List<int> out_triListIndexList = new List<int>();
@@ -106,7 +120,8 @@ public class MipLevelCompute
         // Process one triangle at a time
         int triCount = in_triListIndexArray.Length / 3;
         for (int iTri = 0 ; iTri < triCount; ++iTri) {
-            // Determine if we can trivially accept or reject the triangle based on the clip code
+            // Compute bitwise AND and OR of clip code for all vertices in this triangle
+            // Use this to determine if we can trivially accept or reject the triangle
             int clipCodeAND = 0;
             int clipCodeOR = 0;
             for (int i = 0; i < 3; ++i) {
@@ -128,6 +143,7 @@ public class MipLevelCompute
                 }
             } else {
                 // Triangle needs to be clipped.  The result of the clip will be a convex polygon.
+                // Move our geometry into a list to pass into polygon clip routine
                 List<Vector4> polygonHomoPosList = new List<Vector4>();
                 List<Vector2> polygonUVList = new List<Vector2>();
                 for (int i = 0; i < 3; ++i) {
@@ -156,7 +172,6 @@ public class MipLevelCompute
                     out_triListIndexList.Add(baseIndex + i + 1);
                     out_triListIndexList.Add(baseIndex + i + 2);
                 }
-
             }
         }
     
@@ -167,6 +182,7 @@ public class MipLevelCompute
         return output;
     }
 
+    // Output for rasteriazation setup
     struct RasterSetupStepOutput {
         // Screen x, screen y and reciprocal of w
         public Vector3[] sxsyrhwArray;
@@ -183,6 +199,7 @@ public class MipLevelCompute
         output.sxsyrhwArray = new Vector3[count];
         output.rhwuvArray = new Vector2[count];
 
+        // Process one vertex at at time
         for (int i = 0; i < count; ++i) {
             // Compute screen x,y and rhw
             Vector4 hxhyhzw = hxhyhzwArray[i];
@@ -218,16 +235,20 @@ public class MipLevelCompute
         return uv;
     }
 
-    struct ComputeMipLevelsOutput {
-        public float[] mipLevelArray;
+    // Output of the interpolation step
+    struct InterpolationStepOutput {
+        // Partial derivatives of u/v for every vertex of every triangle
+        public Vector2[] dudvdxArray;
+        public Vector2[] dudvdyArray;
     }
 
-    // Compute mip levels for every vertex of every triangle.
+    // Compute partial derivatives of uv with respect to screen x,y for every vertex of every triangle
     // There really should only be one mip level per vertex, but because of the way the geometry is specified, we can't guarantee this
-    static ComputeMipLevelsOutput ComputeMipLevels(Vector2 in_textureSizeInPixels, Vector3[] in_sxsyrhwArray, Vector2[] in_rhwuvArray, int[] in_triListIndexArray) {
+    static InterpolationStepOutput InterpolationStep(Vector2 in_textureSizeInPixels, Vector3[] in_sxsyrhwArray, Vector2[] in_rhwuvArray, int[] in_triListIndexArray) {
         // Allocate output
-        ComputeMipLevelsOutput output;
-        output.mipLevelArray = new float[in_triListIndexArray.Length];
+        InterpolationStepOutput output;
+        output.dudvdxArray = new Vector2[in_triListIndexArray.Length];
+        output.dudvdyArray = new Vector2[in_triListIndexArray.Length];
 
         // Process one triangle at a time
         int count = in_triListIndexArray.Length / 3;
@@ -242,7 +263,7 @@ public class MipLevelCompute
             }
 
             // Process each point of the triangle
-            const float d = 1.0f; // Distance from each point to interpolate
+            const float d = 1.0f; // Distance from each point to interpolate in screen pixels
             for (int i = 0; i < 3; ++i) {
                 // Data for this point
                 float sx = sxsyrhwArray[i].x;
@@ -254,13 +275,11 @@ public class MipLevelCompute
 
                 // Complete computation of partial derivatives
                 Vector2 uv = rhwuvArray[i] / sxsyrhwArray[i].z;
-                Vector2 duv_dx = uv_dx - uv;
-                Vector2 duv_dy = uv_dy - uv;
+                Vector2 duv_dx = (uv_dx - uv) / d;
+                Vector2 duv_dy = (uv_dy - uv) / d;
 
-                // Compute uv area of parallelogram mapped by a single pixel, multiply by texture dim, sqrt for mip level! finally!                
-                float a_uv = Mathf.Abs(duv_dx.x * duv_dy.y - duv_dy.x * duv_dx.y) / (d * d);
-                float mipLevel = Mathf.Sqrt(a_uv * in_textureSizeInPixels.x * in_textureSizeInPixels.y);
-                output.mipLevelArray[iTri * 3 + i] = mipLevel;
+                output.dudvdxArray[iTri * 3 + i] = duv_dx;
+                output.dudvdyArray[iTri * 3 + i] = duv_dy;
             }
         }
         return output;
@@ -276,14 +295,19 @@ public class MipLevelCompute
         new Vector4( 0.0f, 0.0f,-1.0f, 1.0f),  // z far
     };
 
-    public struct DoOutput {
+    // Output of our main function
+    public struct MainOutput {
+        // min and max mip levels used on visible regions of the input geometry only
         public float minMipLevel;
         public float maxMipLevel;
+        // true if the entire set of input geometry is outside the view
         public bool isOutsideView;
     };
 
-    public static DoOutput Do(Matrix4x4 in_worldViewProjMatrix, Vector2 in_screenSizeInPixels, Vector2 in_textureSizeInPixels, Vector3[] in_xyzArray, Vector2[] in_uvArray, int[] in_triListIndexArray) {
-        DoOutput output;
+    // Main entry point
+    // For the input set of geometry, texture and view information, compute the min and max mip levels seen on screen
+    public static MainOutput Main(Matrix4x4 in_worldViewProjMatrix, Vector2 in_screenSizeInPixels, Vector2 in_textureSizeInPixels, Vector3[] in_xyzArray, Vector2[] in_uvArray, int[] in_triListIndexArray) {
+        MainOutput output;
         output.isOutsideView = false;
         output.minMipLevel = float.MaxValue;
         output.maxMipLevel = float.MinValue;
@@ -310,14 +334,21 @@ public class MipLevelCompute
             // Compute interpolants we will use for our mip calculation
             RasterSetupStepOutput rasterSetupStepOutput = RasterSetupStep(in_screenSizeInPixels, clipStepOutput.hxhyhzwArray, clipStepOutput.uvArray);
 
-            // Compute mip levels for every vertex of every triangle
-            ComputeMipLevelsOutput computeMipLevelsOutput = ComputeMipLevels(in_textureSizeInPixels, rasterSetupStepOutput.sxsyrhwArray, rasterSetupStepOutput.rhwuvArray, clipStepOutput.triListIndexArray);
+            // Compute partial derivatives of uv for every vertex of every triangle
+            InterpolationStepOutput interpolationStepOutput = InterpolationStep(in_textureSizeInPixels, rasterSetupStepOutput.sxsyrhwArray, rasterSetupStepOutput.rhwuvArray, clipStepOutput.triListIndexArray);
 
-            // Compute max/min values for return
-            for (int i = 0; i < computeMipLevelsOutput.mipLevelArray.Length; ++i) {
-                float x = computeMipLevelsOutput.mipLevelArray[i];
-                output.maxMipLevel = Mathf.Max(output.maxMipLevel, x);
-                output.minMipLevel = Mathf.Min(output.minMipLevel, x);
+            // Compute mip levels using the partial derivates and max/min values for return
+            for (int i = 0; i < interpolationStepOutput.dudvdxArray.Length; ++i) {
+                Vector2 dudvdx = interpolationStepOutput.dudvdxArray[i];
+                Vector2 dudvdy = interpolationStepOutput.dudvdyArray[i];
+
+                // Compute uv area of parallelogram mapped by a single pixel, multiply by texture dim, sqrt for mip level! finally!                
+                float a_uv = Mathf.Abs(dudvdx.x * dudvdy.y - dudvdy.x * dudvdx.y);
+                float mipLevel = Mathf.Sqrt(a_uv * in_textureSizeInPixels.x * in_textureSizeInPixels.y);
+
+                // We are only interested in the min and max values for our final result
+                output.maxMipLevel = Mathf.Max(output.maxMipLevel, mipLevel);
+                output.minMipLevel = Mathf.Min(output.minMipLevel, mipLevel);
             }
         }
         return output;
