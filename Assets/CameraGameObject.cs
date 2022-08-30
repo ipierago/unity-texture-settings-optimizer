@@ -63,7 +63,7 @@ public class CameraGameObject : MonoBehaviour
 
     // Compute barycentric coordinates (u, v, w) for
     // point p with respect to triangle (a, b, c)
-    Vector3 Barycentric(Vector2 p, Vector2 a,Vector2 b, Vector2 c)
+    Vector3 BarycentricV1(Vector2 p, Vector2 a,Vector2 b, Vector2 c)
     {
         Vector2 v0 = b - a, v1 = c - a, v2 = p - a;
         float den = v0.x * v1.y - v1.x * v0.y;
@@ -118,10 +118,65 @@ public class CameraGameObject : MonoBehaviour
         Vector3 p = new Vector3(2.5f, 2.5f, 0.0f);
         Vector3 spp = camera.WorldToScreenPoint(p);
         Vector2 spp_v2 = new Vector2(spp.x, spp.y);
-        Vector3 w0 = Barycentric(spp_v2, sp0_v2, sp1_v2, sp2_v2);
+        Vector3 w0 = BarycentricV1(spp_v2, sp0_v2, sp1_v2, sp2_v2);
         Vector3 w1 = BarycentricV2(spp_v2, sp0_v2, sp1_v2, sp2_v2);
         Vector3 w2 = BarycentricV3(spp_v2, sp0_v2, sp1_v2, sp2_v2);
+    }
 
+    Vector3 ComputeBarycentricCoords(float px, float py, float v1x, float v1y, float v2x, float v2y, float v3x, float v3y)
+    {
+        float w1 = ((v2y - v3y) * (px - v3x) + (v3x - v2x) * (py - v3y)) /
+                ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
+        float w2 = ((v3y - v1y) * (px - v3x) + (v1x - v3x) * (py - v3y)) /
+                ((v2y - v3y) * (v1x - v3x) + (v3x - v2x) * (v1y - v3y));
+        float w3 = 1.0f - w1 - w2;
+        return new Vector3(w1, w2, w3);
+    }    
+
+    void TestInterpolation() {
+        Camera camera = GetComponent<Camera>();
+
+        Vector3 v0 = new Vector3(0.0f, 0.0f, 0.0f);
+        Vector2 uv0 = new Vector3(0.0f, 0.0f);
+        Vector3 v1 = new Vector3(5.0f, 0.0f, 100.0f);
+        Vector2 uv1 = new Vector3(1.0f, 0.0f);
+        Vector3 v2 = new Vector3(5.0f, 5.0f, 100.0f);
+        Vector2 uv2 = new Vector3(1.0f, 1.0f);
+
+        Vector3 sp0 = camera.WorldToScreenPoint(v0); 
+        Vector3 sp1 = camera.WorldToScreenPoint(v1); 
+        Vector3 sp2 = camera.WorldToScreenPoint(v2); 
+
+        // interpolant for 1/w
+        float iw0 = 1.0f / sp0.z;
+        float iw1 = 1.0f / sp1.z;
+        float iw2 = 1.0f / sp2.z;
+
+        // interpolant for u/w and v/w
+        Vector2 iuv0 = new Vector2(uv0.x * iw0, uv0.y * iw0);
+        Vector2 iuv1 = new Vector2(uv1.x * iw1, uv1.y * iw1);
+        Vector2 iuv2 = new Vector2(uv2.x * iw2, uv2.y * iw2);
+
+        const int numSteps = 10;
+        Vector2 delta = new Vector2((sp1.x - sp0.x) / numSteps, (sp1.y - sp0.y) / numSteps);
+        Vector2[] spArray = new Vector2[numSteps];
+        Vector3[] wArray = new Vector3[numSteps];
+        float[] iwArray = new float[numSteps];
+        Vector2[] iuvArray = new Vector2[numSteps];
+        Vector2[] uvArray = new Vector2[numSteps];
+        for (int i = 0; i < numSteps; ++i) {
+            Vector2 sp = new Vector2(sp0.x + i * delta.x, sp0.y + i * delta.y);
+            Vector3 w = ComputeBarycentricCoords(sp.x, sp.y, sp0.x, sp0.y, sp1.x, sp1.y, sp2.x, sp2.y);
+            float iw = w.x * iw0 + w.y * iw1 + w.z * iw2;
+            Vector2 iuv = w.x * iuv0 + w.y * iuv1 + w.z * iuv2;
+            Vector2 uv = iuv / iw;
+            spArray[i] = sp;
+            wArray[i] = w;
+            iwArray[i] = iw;
+            iuvArray[i] = iuv;
+            uvArray[i] = uv;
+        }
+        
     }
 
 
@@ -200,6 +255,7 @@ public class CameraGameObject : MonoBehaviour
 
     void Update()
     {
-        TestBarycentric ();
+        //TestBarycentric ();
+        TestInterpolation();
     }
 }
