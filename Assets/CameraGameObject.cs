@@ -361,7 +361,7 @@ public class CameraGameObject : MonoBehaviour
         }
     }
 
-    void ClipTest() {
+    void ClipTest1() {
 
         Camera camera = GetComponent<Camera>();
 
@@ -403,6 +403,147 @@ public class CameraGameObject : MonoBehaviour
             Vector3 vp_check = camera.WorldToViewportPoint(worldVertex3);
             meshHomoCoord[i] = projVertex;
         }
+    }
+
+    void ClipPolygonWithUVToPlaneInHomogenousCoordinates(Vector4 in_clipPlaneN, List<Vector4> in_listHPos, List<Vector2> in_listUV, List<Vector4> out_listHPos, List<Vector2> out_listUV) {
+
+    }
+
+    // Output for TransformStep
+    struct TransformStepOutput {
+        public Vector4[] homoPosArray;
+        public float[,] dotClipPlanesArray;
+        public int [] clipCodeArray;
+        public int clipCodeAND;
+        public int clipCodeOR;
+    }
+
+    // Transform local positions to homogeneous space and compute dot products with clip planes and corresponding clip codes
+    TransformStepOutput TransformStep(Matrix4x4 worldViewProjMatrix, Vector4[] homoClipPlaneNormals, Vector3[] localPosArray) {
+        TransformStepOutput output;
+
+        // Allocate output arrays
+        output.homoPosArray = new Vector4[localPosArray.Length];
+        output.dotClipPlanesArray = new float[localPosArray.Length, homoClipPlaneNormals.Length];
+        output.clipCodeArray = new int[localPosArray.Length];
+        output.clipCodeAND = 0;
+        for (int i = 0; i < homoClipPlaneNormals.Length; ++i) output.clipCodeAND |= (1 << i);
+        output.clipCodeOR = 0;
+
+        for (int i = 0; i < localPosArray.Length; ++i) {
+            // Homogeneous position
+            Vector3 localPos3 = localPosArray[i];
+            Vector4 localPos4 = new Vector4(localPos3.x, localPos3.y, localPos3.z, 1.0f);
+            Vector4 homoPos = worldViewProjMatrix * localPos4;
+            output.homoPosArray[i] = homoPos;
+
+            // Dot product with clip planes and corresponding clip code
+            int clipCode = 0;
+            for (int j = 0; j < homoClipPlaneNormals.Length; ++j) {
+                float dot = Vector4.Dot(homoPos, homoClipPlaneNormals[j]);
+                output.dotClipPlanesArray[i, j] = dot;
+                if (dot < 0) clipCode |= (1 << j);
+            }
+            output.clipCodeArray[i] = clipCode;
+            output.clipCodeAND &= clipCode;
+            output.clipCodeOR |= clipCode;
+        }
+        return output;
+    }
+
+    struct ClipPolygonOutput {
+        public List<Vector4> homoPosList;
+        public List<Vector2> uvList;
+    }
+
+    // Clip a polygon with UVs against the input homogeneous clip plane
+    ClipPolygonOutput ClipPolygon(List<Vector4> polygonHomoPosList, List<Vector2> polygonUVList, Vector4 homoClipPlaneNormal) {
+        ClipPolygonOutput output;
+        output.homoPosList = new List<Vector4>();
+        output.uvList = new List<Vector2>();
+        // TODO: Implement!
+        return output;
+    }
+
+    // Output of clip step
+    struct ClipStepOutput {
+        public Vector4[] homoPosArray;
+        public Vector2[] uvArray;
+    }
+
+    // Clip 
+    ClipStepOutput ClipStep(Vector4[] inputHomoPosArray, Vector2[] inputUVArray, int[] triListIndexArray, Vector4[] homoClipPlaneNormals, float[,] dotClipPlanesArray, int [] clipCodeArray) {
+        ClipStepOutput output;
+
+        List<Vector4> outputHomoPosList = new List<Vector4>();
+        List<Vector2> outputUVList = new List<Vector2>();
+
+        // Process one triangle at a time
+        int triCount = triListIndexArray.Length / 3;
+        for (int iTri = 0 ; iTri < triCount; ++iTri) {
+            // Determine if we can trivially accept or reject the triangle based on the clip code
+            int clipCodeAND = 0;
+            int clipCodeOR = 0;
+            for (int i = 0; i < 3; ++i) {
+                int index = triListIndexArray[3 * iTri + i];
+                int clipCode = clipCodeArray[index];
+                if (i == 0) clipCodeAND = clipCode; else clipCodeAND &= clipCode;
+                clipCodeOR |= clipCode;
+            }
+            if (clipCodeAND != 0) {
+                // All vertices are outside at least one of the planes, we can trivially reject this triangle
+            } else if (clipCodeOR == 0) {
+                // All vertices are inside all the planes, we can trivially accept this triangle
+                for (int i = 0; i < 3; ++i) {
+                    int index = triListIndexArray[3 * iTri + i];
+                    outputHomoPosList.Add(inputHomoPosArray[index]);
+                    outputUVList.Add(inputUVArray[index]);
+                }
+            } else {
+                // Triangle needs to be clipped.  The result of the clip will be a convex polygon.
+                List<Vector4> polygonHomoPosList = new List<Vector4>();
+                List<Vector2> polygonUVList = new List<Vector2>();
+                for (int i = 0; i < 3; ++i) {
+                    int index = triListIndexArray[3 * iTri + i];
+                    polygonHomoPosList.Add(inputHomoPosArray[index]);
+                    polygonUVList.Add(inputUVArray[index]);
+                }
+
+                // Consider one clip plane at a time
+                for (int iPlane = 0; iPlane < homoClipPlaneNormals.Length; ++iPlane) {
+                    // We can skip any planes that did not clip the original triangle
+                    if ((clipCodeOR & (1 << iPlane)) != 0) {
+                        // Clip the polygon and replace our polygon data with the new data
+                        ClipPolygonOutput clipPolygonOutput = ClipPolygon(polygonHomoPosList, polygonUVList, homoClipPlaneNormals[iPlane]);
+                        polygonHomoPosList = clipPolygonOutput.homoPosList;
+                        polygonUVList = clipPolygonOutput.uvList;
+                    }
+                }
+
+                // Create triangle fan from the resulting clipped polygon
+                for (int i = 0; i < polygonHomoPosList.Count; ++i) {
+                    
+                }
+
+            }
+        }
+    
+        output.homoPosArray = outputHomoPosList.ToArray();
+        output.uvArray = outputUVList.ToArray();
+        return output;
+    }
+
+    void ClipTest2() {
+
+        // Normals of clip planes in homogeneous space facing inwards for LH space
+        Vector4[] homoClipPlaneNormalsLH = new Vector4[] {
+            new Vector4( 1.0f, 0.0f, 0.0f, 1.0f),  // x left
+            new Vector4(-1.0f, 0.0f, 0.0f, 1.0f),  // x right
+            new Vector4( 0.0f,-1.0f, 0.0f, 1.0f),  // y top
+            new Vector4( 0.0f, 1.0f, 0.0f, 1.0f),  // y bottom
+            new Vector4( 0.0f, 0.0f, 1.0f, 1.0f),  // z near
+            new Vector4( 0.0f, 0.0f,-1.0f, 1.0f),  // z far
+        };
 
 
 
@@ -416,6 +557,8 @@ public class CameraGameObject : MonoBehaviour
         
         //ComputeMipUVAreasForTriangle_Test();
 
-        ClipTest();
+        //ClipTest1();
+
+        ClipTest2();
     }
 }
