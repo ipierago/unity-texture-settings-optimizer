@@ -591,18 +591,20 @@ public class CameraGameObject : MonoBehaviour
         };
 
         Vector3[] localPosArray = new Vector3[] {
-            new Vector3( 0.0f, 0.0f, 0.0f),
-            new Vector3(10.0f, 0.0f, 0.0f),
+            new Vector3( 0.0f,-10.0f, 0.0f),
+            new Vector3(10.0f,-10.0f, 0.0f),
             new Vector3(10.0f, 10.0f, 0.0f),
+            new Vector3(0.0f, 10.0f, 0.0f),
         };
 
         Vector2[] uvArray = new Vector2[] {
             new Vector2(0.0f, 0.0f),
             new Vector2(1.0f, 0.0f),
-            new Vector2(1.0f, 1.0f)
+            new Vector2(1.0f, 1.0f),
+            new Vector2(0.0f, 1.0f)
         };
 
-        int [] triListIndexArray = new int [] { 0, 1, 2};
+        int [] triListIndexArray = new int [] { 0, 1, 2, 0, 2, 3};
 
         lastGeometry.posArray = localPosArray;
         lastGeometry.triListIndexArray = triListIndexArray;
